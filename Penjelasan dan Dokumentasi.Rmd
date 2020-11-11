@@ -2,29 +2,399 @@
 title: "Credit Card Fraud Detection"
 author: "Praditya Humam Ramadhanu"
 date: "11/11/2020"
-output: html_document
+output:
+  pdf_document: default
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
+# Introduction
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+Project ini bertujuan untuk membuat model yang dapat mengklasifikasikan apakah sebuah transaksi termasuk fraud atau tidak. Kebanyakan fitur dalam dataset sudah discaled nilainya dan tidak ditunjukkan nama fiturnya untuk alasan privasi. Namun,kita tetap bisa membangun model menggunakan fitur-fitur tersebut untuk melakukan klasifikasi.
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+## Tujuan Project
 
-```{r cars}
-summary(cars)
+1. Memahami distribusi data transaksi yang bersifat fraud dan tidak.
+2. Membuat sub-dataframe dengan rasio transaksi fraud dan tidak fraud         yang tidak terlalu jauh agar model tidak overfitting.
+3. Menentukan algoritma klasifikasi mana yang memberikan hasil yang           terbaik.
+
+## Referensi 
+
+1. [Kaggle](https://www.kaggle.com/janiobachmann/credit-fraud-dealing-with-imbalanced-datasets/notebook)
+2. [Machinelearningplus.com](https://www.machinelearningplus.com/machine-learning/caret-package/)
+
+
+## Packages yang Digunakan
+
+```{r Daftar Library}
+# library untuk mengolah data
+library(utils)
+library(tidyr)
+library(dplyr)
+
+# library untuk memplot data
+library(corrplot)
+library(ggplot2)
+
+# library untuk membangun model
+library(caret)
+
+# library untuk directory
+library(here)
+
+```
+# Datasets 
+
+Dataset transaksi kartu kredit berasal dari [kaggle](https://www.kaggle.com/mlg-ulb/creditcardfraud). Data berisi 28 variabel yang tidak diketahui nama kolomnya dan sudah di scaled oleh pemilik data,variabel waktu transaksi, dan variabel jumlah uang pertransaksi.
+
+```{r Summary Data}
+# Import data csv
+df <- read.csv(here("creditcard.csv"))
+
+# melihat ringkasan dataframe
+str(df)
+summary(df)
+
+# cek jumlah data kosong dan data na
+sum(is.null(df))
+sum(is.na(df))
+
+# melihat perbandingan data fraud dan non frauds
+p_f <- round(sum(df$Class==1)/nrow(df)*100,2)
+p_nf <- round(sum(df$Class==0)/nrow(df)*100,2)
+sprintf("Persentase data yang bersifat frauds adalah %g persen",p_f)
+sprintf("Persentase data yang bersifat non-frauds adalah %g persen",p_nf)
 ```
 
-## Including Plots
+### Exploration Data Analysis
+Berdasarkan eksplorasi data diatas, tidak terdapat nilai NULL atau nilai NA pada dataset. Dataset juga sangat tidak seimbang, persentase observasi yang termasuk non-frauds jauh lebih besar dibandingkan yang termasuk frauds.
 
-You can also embed plots, for example:
+```{r Plot Distribusi Variabel}
+#memplot distribusi waktu dan jumlah per transaksi
+ggplot(df,aes(x=Time))+
+  geom_histogram()+
+  labs(title = "Distribusi Waktu Transaksi")
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+ggplot(df,aes(x=Amount))+
+  geom_histogram()+
+  labs(title ="Distribusi Jumlah Transaksi")
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+Dilihat dari distribusi waktu transaksi diketahui bahwa terdapat dua waktu puncak yang terjadi jumlah transaksi terbanyak. Dilihat dari distribusi jumlah transaksi diketahui bahwa jumlah transaksi di dataset ini mayoritas adalah transaksi berjumlah kecil.
+
+
+#Pre-processing
+
+### Scaling Variabel
+Semua variabel kecuali "Time" dan "Amount" sudah di scaled, oleh karena itu kita scaled variebel "Time" dan "Amount".  
+```{r Scaled Variable}
+#membuat dataset baru tanpa kolom time dan amount untuk sampling
+new_df<- subset(df,select = -c(Time,Amount))
+
+#membuat skala kolom time dan amount agar ternormalisasi di dataset baru
+new_df$scale_time <- scale(df$Time)
+new_df$scale_amount <- scale(df$Amount)
+
+```
+
+
+### Undersampling
+
+Perbandingan persentase data yang fraud (`r p_f`) dan data yang non-fraud ('r p_nf`) sangat tidak seimbang. Oleh karena itu perlu diperlakukan teknik sampling undersampling atau oversampling agar model yang dihasilkan tidak overfitting kearah non-fraud. Pada project ini akan digunakan random undersampling.
+```{r undersampling}
+#membuat dataset baru tanpa kolom time dan amount untuk sampling
+data<- subset(df,select = -c(Time,Amount))
+
+#membuat skala kolom time dan amount agar ternormalisasi di dataset baru
+data$scale_time <- scale(df$Time)
+data$scale_amount <- scale(df$Amount)
+
+#membuat dataset baru untuk yang fraud dan non fraud
+fraud_df <- filter(data,Class==1)
+nfraud_df <- filter(data,Class==0)  
+
+#Melakukan undersampling
+set.seed(50)
+sample_num <- sample(nrow(nfraud_df),nrow(fraud_df))
+under_sampling <- nfraud_df[sample_num,]
+
+#membuat dataset baru hasil undersampling
+new_df <- rbind(fraud_df,under_sampling)
+
+#plot hasil undersampling
+ggplot(new_df,aes(x=Class))+
+  geom_bar()+
+  scale_x_discrete(labels=c('non-fraud','fraud'))
+
+```
+
+### Correlation Matrix
+Setelah semua data di scaled, kita lihat bagimana korelasi antar semua variabel dengan memplot correlation matrix.
+```{r Correlation Matrix}
+#melihat korelasi matrix antar variabel
+cor_mat <- cor(new_df)
+corrplot(cor_mat, type = "upper", order = "hclust", 
+         tl.col = "black", tl.srt = 45)
+
+#Melihat mana yang korelasi paling berpengaruh ke Class
+matrix <- cor_mat[,"Class"]
+
+# 5 korelasi positif tertinggi terhadap variabel Class
+print(tail(sort(matrix),5,decreasing=TRUE))
+# 5 korelasi negatif tertinggi terhadap variabel Class
+print(head(sort(matrix),5,decreasing=TRUE))
+```
+Dari correlation matrix diatas didapatkan variabel yang paling berpengaruh terhadap variabel "Class" adalah V14,V4,V11,V12, dan V10.
+
+### Outlier Removal
+
+Selanjutnya kita menghilangkan data-data outlier data-data outlier berdasarkan V14,V4,V11,V12, dan V10. Namun, karena label yang diutamakan untuk dideteksi adalah berlabel fraud, maka kita lebih mengutamakan menghapus nilai outlier dari data-data yang berlabel fraud.
+
+```{r Outlier Removal}
+#menghapus data outlier berdasarkan v14,v4,v11,v12,v10
+
+##Mendapatkan nilai yg fraud di V14
+v14_fraud <- new_df%>%
+  filter(Class==1)
+
+
+v14_q25 <- quantile(v14_fraud$V14,0.25)
+sprintf("kuartil 25 v14 adalah %g",v14_q25)
+v14_q75 <- quantile(v14_fraud$V14,0.75)
+sprintf("kuartil 75 v14 adalah %g",v14_q75)
+v14_iqr <- v14_q75 - v14_q25
+sprintf("Jarak Interkuartil v14 adalah %g",v14_iqr)
+
+v14_upper <- v14_q75 + v14_iqr*1.5
+sprintf("V14 Upper : %g",v14_upper)
+v14_lower <- v14_q25 - v14_iqr*1.5
+sprintf("V14 Lower : %g",v14_lower)
+
+outlier_v14 <- which(v14_fraud$V14<v14_lower|v14_fraud$V14>v14_upper) 
+data_outlier_v14 <- v14_fraud[outlier_v14,"V14"]
+print(data_outlier_v14)
+length(data_outlier_v14)
+
+#menghilangkan data outlier dari dataset 
+if(length(outlier_v14)>0){
+  new_df <- new_df[-outlier_v14,]
+} else print("Tidak ada data outlier")
+
+
+##Mendapatkan nilai yg fraud di V4
+v4_fraud <- new_df%>%
+  filter(Class==1)
+
+
+v4_q25 <- quantile(v4_fraud$V4,0.25)
+sprintf("kuartil 25 v4 adalah %g",v4_q25)
+v4_q75 <- quantile(v4_fraud$V4,0.75)
+sprintf("kuartil 75 v4 adalah %g",v4_q75)
+v4_iqr <- v4_q75 - v4_q25
+sprintf("Jarak Interkuartil v4 adalah %g",v4_iqr)
+
+v4_upper <- v4_q75 + v4_iqr*1.5
+sprintf("V4 Upper : %g",v4_upper)
+v4_lower <- v4_q25 - v4_iqr*1.5
+sprintf("V4 Lower : %g",v4_lower)
+
+outlier_v4 <- which(v4_fraud$V4<v4_lower|v4_fraud$V4>v4_upper) 
+data_outlier_v4 <- v4_fraud[outlier_v4,"V4"]
+print(data_outlier_v4)
+length(data_outlier_v4)
+
+#menghilangkan data outlier dari dataset
+if(length(outlier_v4)>0){
+  new_df <- new_df[-outlier_v4,]
+} else print("Tidak ada data outlier")
+
+
+##Mendapatkan nilai yg fraud di V11
+v11_fraud <- new_df%>%
+  filter(Class==1)
+
+
+v11_q25 <- quantile(v11_fraud$V11,0.25)
+sprintf("kuartil 25 v11 adalah %g",v11_q25)
+v11_q75 <- quantile(v11_fraud$V11,0.75)
+sprintf("kuartil 75 v11 adalah %g",v11_q75)
+v11_iqr <- v11_q75 - v11_q25
+sprintf("Jarak Interkuartil v11 adalah %g",v11_iqr)
+
+v11_upper <- v11_q75 + v11_iqr*1.5
+sprintf("V11 Upper : %g",v11_upper)
+v11_lower <- v11_q25 - v11_iqr*1.5
+sprintf("V11 Lower : %g",v11_lower)
+
+outlier_v11 <- which(v11_fraud$V11<v11_lower|v11_fraud$V11>v11_upper) 
+data_outlier_v11 <- v11_fraud[outlier_v11,"V11"]
+print(data_outlier_v11)
+length(data_outlier_v11)
+
+#menghilangkan data outlier dari dataset 
+if(length(outlier_v11)>0){
+  new_df <- new_df[-outlier_v11,]
+} else print("Tidak ada data outlier")
+
+
+##Mendapatkan nilai yg fraud di V12
+v12_fraud <- new_df%>%
+  filter(Class==1)
+
+
+v12_q25 <- quantile(v12_fraud$V12,0.25)
+sprintf("kuartil 25 v12 adalah %g",v12_q25)
+v12_q75 <- quantile(v12_fraud$V12,0.75)
+sprintf("kuartil 75 v12 adalah %g",v12_q75)
+v12_iqr <- v12_q75 - v12_q25
+sprintf("Jarak Interkuartil v12 adalah %g",v12_iqr)
+
+v12_upper <- v12_q75 + v12_iqr*1.5
+sprintf("V12 Upper : %g",v12_upper)
+v12_lower <- v12_q25 - v12_iqr*1.5
+sprintf("V12 Lower : %g",v12_lower)
+
+outlier_v12 <- which(v12_fraud$V12<v12_lower|v12_fraud$V12>v12_upper) 
+data_outlier_v12 <- v12_fraud[outlier_v12,"V12"]
+print(data_outlier_v12)
+length(data_outlier_v12)
+#menghilangkan data outlier dari dataset 
+if(length(outlier_v12)>0){
+  new_df <- new_df[-outlier_v12,]
+} else print("Tidak ada data outlier")
+
+
+##Mendapatkan nilai yg fraud di V10
+v10_fraud <- new_df%>%
+  filter(Class==1)
+
+
+v10_q25 <- quantile(v10_fraud$V10,0.25)
+sprintf("kuartil 25 v10 adalah %g",v10_q25)
+v10_q75 <- quantile(v10_fraud$V10,0.75)
+sprintf("kuartil 75 v10 adalah %g",v10_q75)
+v10_iqr <- v10_q75 - v10_q25
+sprintf("Jarak Interkuartil v10 adalah %g",v10_iqr)
+
+v10_upper <- v10_q75 + v10_iqr*1.5
+sprintf("V10 Upper : %g",v10_upper)
+v10_lower <- v10_q25 - v10_iqr*1.5
+sprintf("V10 Lower : %g",v10_lower)
+
+outlier_v10 <- which(v10_fraud$V10<v10_lower|v10_fraud$V10>v10_upper) 
+data_outlier_v10 <- v10_fraud[outlier_v10,"V10"]
+print(data_outlier_v10)
+length(data_outlier_v10)
+
+#menghilangkan data outlier dari dataset
+if(length(outlier_v10)>0){
+  new_df <- new_df[-outlier_v10,]
+} else print("Tidak ada data outlier")
+
+
+#mengubah variabel Class menjadi factor N= Non-fraud dan F= Frauds
+new_df$Class <- factor(new_df$Class,levels = c(0,1),labels = c("N","F"))
+
+
+```
+
+# Membangun Model
+
+## Membuat Hypertuning Parameter Obyek untuk Semua Model
+```{r Hypertuning Parameter}
+set.seed(50)
+mycontrol <- trainControl(method = "cv",
+                          number = 10,
+                          summaryFunction = twoClassSummary,
+                          classProbs = TRUE,
+                          verboseIter = TRUE)
+```
+
+## Membuat Model untuk klasifikasi
+Project ini menggunakan 5 algortima klasifikasi untuk dibandingkan hasil akhirnya, yaitu : Random Forest, glmnet atau logistic regression, Extreme Gradient Boost(XGBdart),Support Vector Machine(SVM), dan K Nearest Neighbor. Cross Validation juga dilakukan dengan jumlah fold = 10.
+```{r modeling}
+#Membuat model dengan caret beserta cv
+
+##membuat object hypertuning parameter
+set.seed(50)
+mycontrol <- trainControl(method = "cv",
+                          number = 10,
+                          summaryFunction = twoClassSummary,
+                          classProbs = TRUE,
+                          verboseIter = TRUE)
+
+##membuat model klasifikasi dengan random forest
+model_rf <- train( Class ~ .,
+                    data = new_df,
+                    tuneLength=3,
+                    metric = "ROC",
+                    method = "ranger",
+                    trControl = mycontrol)
+print(model_rf)
+max(model_rf[["results"]][["ROC"]])
+
+
+##membuat model klasifikasi dengan glmnet
+model_glmnet <- train( Class ~ .,
+                   data = new_df,
+                   tuneLength=3,
+                   metric = "ROC",
+                   method = "glmnet",
+                   trControl = mycontrol)
+print(model_glmnet)
+max(model_glmnet[["results"]][["ROC"]])
+
+##membuat model klasifikasi dengan xgbDart
+model_xgbdart <- train( Class ~ .,
+                       data = new_df,
+                       tuneLength=3,
+                       metric = "ROC",
+                       method = "xgbDART",
+                       trControl = mycontrol)
+print(model_xgbdart)
+max(model_xgbdart[["results"]][["ROC"]])
+
+##membuat model klasifikasi dengan SVM
+model_svm <- train( Class ~ .,
+                        data = new_df,
+                        tuneLength=3,
+                        metric = "ROC",
+                        method = "svmRadial",
+                        trControl = mycontrol)
+print(model_svm)
+max(model_svm[["results"]][["ROC"]])
+
+##membuat model klasifikasi dengan KNN
+model_knn <- train( Class ~ .,
+                    data = new_df,
+                    tuneLength=3,
+                    metric = "ROC",
+                    method = "knn",
+                    trControl = mycontrol)
+print(model_knn)
+max(model_knn[["results"]][["ROC"]])
+
+```
+
+# Membandingkan Performa Model
+
+Kelima model yang digunakan dalam project ini dibandingkan menggunakan metrik berupa ROC karena dataset yang digunakan dalam project ini sangat tidak berimbang proposinya,sehingga ROC lebih cocok untuk mengukur performa model.
+
+```{r model comparison}
+#membuat list model yang digunakan
+list_model <- list(RF=model_rf,GLMNET=model_glmnet,XGBDART=model_xgbdart,SVM=model_svm,KNN=model_knn)
+
+#membandingkan semua model
+model_compare <- resamples(list_model)
+summary(model_compare)
+scales <- list(x=list(relation="free"), y=list(relation="free"))
+bwplot(model_compare, scales=scales,metric = "ROC")
+
+```
+Berdasarkan boxplot diatas, didapatkan bahwa model yang paling bagus performanya adalah XGBDart.
+
+#Kesimpulan
+
+Dataset credit card fraud yang digunakan dalam project ini mengandung ketidakseimbangan yang sangat jauh antara data berlabel fraud dan non-fraud. Random Undersampling digunakan untuk mengatasi ketidakseimbangan data ini. Variabel yang paling berpengaruh terhadap nilai di variabel "Class" adalah variabel V14,V11,V12,V4,dan V10. Sehingga data outlier dihilangkan berdasarkan variabel-variabel tersebut. Diantara lima model yang digunakan untuk klasifikasi credit card fraud didapatkan bahwa model XGBDart memiliki ROC yang paling bagus senilai 0.981844.

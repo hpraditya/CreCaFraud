@@ -1,0 +1,5 @@
+To do List untuk project ini :
+1. Connect ke database postgresql
+2. Preprosessing dengan query SQL
+3. Coba oversampling untuk datasetnya
+4. Membuat confusion matrix

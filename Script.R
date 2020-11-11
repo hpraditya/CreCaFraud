@@ -4,7 +4,7 @@ library(ggplot2)
 library(caret)
 library(here)
 library(corrplot)
-library(Rtsne)
+
 
 #mengimport file csv
 df <- read.csv(here("creditcard.csv"))
@@ -23,19 +23,21 @@ p_nf <- round(sum(df$Class==0)/nrow(df)*100,2)
 sprintf("Persentase data yang bersifat frauds adalah %g persen",p_f)
 sprintf("Persentase data yang bersifat non-frauds adalah %g persen",p_nf)
 
-#memplot data frauds dan non frauds
-ggplot(df,aes(x=Class))+
-  geom_bar()+
-  scale_x_discrete(labels=c("Non-Frauds","Frauds"))
-  scale_y_continuous(limits=c(1,2500))
-  
-
 #memplot distribusi waktu dan jumlah per transaksi
 ggplot(df,aes(x=Time))+
-  geom_histogram(bins = 50)
+  geom_histogram()+
+  labs(title = "Distribusi Waktu Transaksi")
 
 ggplot(df,aes(x=Amount))+
-  geom_density()
+  geom_histogram()+
+  labs(title ="Distribusi Jumlah Transaksi")
+
+#membuat dataset baru tanpa kolom time dan amount untuk sampling
+data<- subset(df,select = -c(Time,Amount))
+
+#membuat skala kolom time dan amount agar ternormalisasi di dataset baru
+data$scale_time <- scale(df$Time)
+data$scale_amount <- scale(df$Amount)
 
 #membuat dataset baru tanpa kolom time dan amount untuk sampling
 data<- subset(df,select = -c(Time,Amount))
@@ -55,18 +57,23 @@ under_sampling <- nfraud_df[sample_num,]
 
 #membuat dataset baru hasil undersampling
 new_df <- rbind(fraud_df,under_sampling)
+
+#Plot hasil sampling 
 ggplot(new_df,aes(x=Class))+
   geom_bar()+
   scale_x_discrete(labels=c('non-fraud','fraud'))
 
+
 #melihat korelasi matrix antar variabel
 cor_mat <- cor(new_df)
-corrplot(cor_mat, type = "full", order = "hclust", 
+corrplot(cor_mat, type = "upper", order = "hclust", 
          tl.col = "black", tl.srt = 45)
 
 #Melihat mana yang korelasi paling berpengaruh ke Class
 matrix <- cor_mat[,"Class"]
+# 5 korelasi positif tertinggi terhadap variabel Class
 print(tail(sort(matrix),5,decreasing=TRUE))
+# 5 korelasi negatif tertinggi terhadap variabel Class
 print(head(sort(matrix),5,decreasing=TRUE))
 
 #menghapus data outlier berdasarkan v14,v4,v11,v12,v10
@@ -92,8 +99,12 @@ outlier_v14 <- which(v14_fraud$V14<v14_lower|v14_fraud$V14>v14_upper)
 data_outlier_v14 <- v14_fraud[outlier_v14,"V14"]
 print(data_outlier_v14)
 length(data_outlier_v14)
+
 #menghilangkan data outlier dari dataset 
-new_df <- new_df[-outlier_v14,]
+if(length(outlier_v14)>0){
+  new_df <- new_df[-outlier_v14,]
+} else print("Tidak ada data outlier")
+
 
 ##Mendapatkan nilai yg fraud di V4
 v4_fraud <- new_df%>%
@@ -116,8 +127,12 @@ outlier_v4 <- which(v4_fraud$V4<v4_lower|v4_fraud$V4>v4_upper)
 data_outlier_v4 <- v4_fraud[outlier_v4,"V4"]
 print(data_outlier_v4)
 length(data_outlier_v4)
-#menghilangkan data outlier dari dataset 
-new_df <- new_df[-outlier_v4,]
+
+#menghilangkan data outlier dari dataset
+if(length(outlier_v4)>0){
+  new_df <- new_df[-outlier_v4,]
+} else print("Tidak ada data outlier")
+
 
 ##Mendapatkan nilai yg fraud di V11
 v11_fraud <- new_df%>%
@@ -140,8 +155,12 @@ outlier_v11 <- which(v11_fraud$V11<v11_lower|v11_fraud$V11>v11_upper)
 data_outlier_v11 <- v11_fraud[outlier_v11,"V11"]
 print(data_outlier_v11)
 length(data_outlier_v11)
+
 #menghilangkan data outlier dari dataset 
-new_df <- new_df[-outlier_v11,]
+if(length(outlier_v11)>0){
+  new_df <- new_df[-outlier_v11,]
+} else print("Tidak ada data outlier")
+
 
 ##Mendapatkan nilai yg fraud di V12
 v12_fraud <- new_df%>%
@@ -165,7 +184,10 @@ data_outlier_v12 <- v12_fraud[outlier_v12,"V12"]
 print(data_outlier_v12)
 length(data_outlier_v12)
 #menghilangkan data outlier dari dataset 
-new_df <- new_df[-outlier_v12,]
+if(length(outlier_v12)>0){
+  new_df <- new_df[-outlier_v12,]
+} else print("Tidak ada data outlier")
+
 
 ##Mendapatkan nilai yg fraud di V10
 v10_fraud <- new_df%>%
@@ -188,18 +210,22 @@ outlier_v10 <- which(v10_fraud$V10<v10_lower|v10_fraud$V10>v10_upper)
 data_outlier_v10 <- v10_fraud[outlier_v10,"V10"]
 print(data_outlier_v10)
 length(data_outlier_v10)
-#menghilangkan data outlier dari dataset 
-new_df <- new_df[-outlier_v10,]
+
+#menghilangkan data outlier dari dataset
+if(length(outlier_v10)>0){
+  new_df <- new_df[-outlier_v10,]
+} else print("Tidak ada data outlier")
+
 
 #mengubah variabel Class menjadi factor N= Non-fraud dan F= Frauds
 new_df$Class <- factor(new_df$Class,levels = c(0,1),labels = c("N","F"))
 
-#Membuat model dengan caret beserta cv dan pca
+#Membuat model dengan caret beserta cv
 
 ##membuat object hypertuning parameter
 set.seed(50)
 mycontrol <- trainControl(method = "cv",
-                          number = 5,
+                          number = 10,
                           summaryFunction = twoClassSummary,
                           classProbs = TRUE,
                           verboseIter = TRUE)
@@ -208,6 +234,7 @@ mycontrol <- trainControl(method = "cv",
 model_rf <- train( Class ~ .,
                     data = new_df,
                     tuneLength=3,
+                    metric = "ROC",
                     method = "ranger",
                     trControl = mycontrol)
 print(model_rf)
@@ -218,6 +245,7 @@ max(model_rf[["results"]][["ROC"]])
 model_glmnet <- train( Class ~ .,
                    data = new_df,
                    tuneLength=3,
+                   metric = "ROC",
                    method = "glmnet",
                    trControl = mycontrol)
 print(model_glmnet)
@@ -227,6 +255,7 @@ max(model_glmnet[["results"]][["ROC"]])
 model_xgbdart <- train( Class ~ .,
                        data = new_df,
                        tuneLength=3,
+                       metric = "ROC",
                        method = "xgbDART",
                        trControl = mycontrol)
 print(model_xgbdart)
@@ -236,6 +265,7 @@ max(model_xgbdart[["results"]][["ROC"]])
 model_svm <- train( Class ~ .,
                         data = new_df,
                         tuneLength=3,
+                        metric = "ROC",
                         method = "svmRadial",
                         trControl = mycontrol)
 print(model_svm)
@@ -245,6 +275,7 @@ max(model_svm[["results"]][["ROC"]])
 model_knn <- train( Class ~ .,
                     data = new_df,
                     tuneLength=3,
+                    metric = "ROC",
                     method = "knn",
                     trControl = mycontrol)
 print(model_knn)
@@ -256,4 +287,6 @@ list_model <- list(RF=model_rf,GLMNET=model_glmnet,XGBDART=model_xgbdart,SVM=mod
 model_compare <- resamples(list_model)
 summary(model_compare)
 scales <- list(x=list(relation="free"), y=list(relation="free"))
-bwplot(model_compare, scales=scales)
+bwplot(model_compare, scales=scales,metric = "ROC")
+
+
