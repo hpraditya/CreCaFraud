@@ -61,13 +61,13 @@ ggplot(new_df,aes(x=Class))+
 
 #melihat korelasi matrix antar variabel
 cor_mat <- cor(new_df)
-corrplot(cor_mat, type = "upper", order = "hclust", 
+corrplot(cor_mat, type = "full", order = "hclust", 
          tl.col = "black", tl.srt = 45)
 
 #Melihat mana yang korelasi paling berpengaruh ke Class
 matrix <- cor_mat[,"Class"]
-tail(sort(matrix),5,decreasing=TRUE)
-head(sort(matrix),5,decreasing=TRUE)
+print(tail(sort(matrix),5,decreasing=TRUE))
+print(head(sort(matrix),5,decreasing=TRUE))
 
 #menghapus data outlier berdasarkan v14,v4,v11,v12,v10
 
@@ -119,30 +119,29 @@ length(data_outlier_v4)
 #menghilangkan data outlier dari dataset 
 new_df <- new_df[-outlier_v4,]
 
-##Mendapatkan nilai yg fraud di V10
-v10_fraud <- new_df%>%
+##Mendapatkan nilai yg fraud di V11
+v11_fraud <- new_df%>%
   filter(Class==1)
 
 
-v10_q25 <- quantile(v10_fraud$V10,0.25)
-sprintf("kuartil 25 v10 adalah %g",v10_q25)
-v10_q75 <- quantile(v10_fraud$V10,0.75)
-sprintf("kuartil 75 v10 adalah %g",v10_q75)
-v10_iqr <- v10_q75 - v10_q25
-sprintf("Jarak Interkuartil v10 adalah %g",v10_iqr)
+v11_q25 <- quantile(v11_fraud$V11,0.25)
+sprintf("kuartil 25 v11 adalah %g",v11_q25)
+v11_q75 <- quantile(v11_fraud$V11,0.75)
+sprintf("kuartil 75 v11 adalah %g",v11_q75)
+v11_iqr <- v11_q75 - v11_q25
+sprintf("Jarak Interkuartil v11 adalah %g",v11_iqr)
 
-v10_upper <- v10_q75 + v10_iqr*1.5
-sprintf("V10 Upper : %g",v10_upper)
-v10_lower <- v10_q25 - v10_iqr*1.5
-sprintf("V10 Lower : %g",v10_lower)
+v11_upper <- v11_q75 + v11_iqr*1.5
+sprintf("V11 Upper : %g",v11_upper)
+v11_lower <- v11_q25 - v11_iqr*1.5
+sprintf("V11 Lower : %g",v11_lower)
 
-outlier_v10 <- which(v10_fraud$V10<v10_lower|v10_fraud$V10>v10_upper) 
-data_outlier_v10 <- v10_fraud[outlier_v10,"V10"]
-print(data_outlier_v10)
-length(data_outlier_v10)
+outlier_v11 <- which(v11_fraud$V11<v11_lower|v11_fraud$V11>v11_upper) 
+data_outlier_v11 <- v11_fraud[outlier_v11,"V11"]
+print(data_outlier_v11)
+length(data_outlier_v11)
 #menghilangkan data outlier dari dataset 
-new_df <- new_df[-outlier_v10,]
-
+new_df <- new_df[-outlier_v11,]
 
 ##Mendapatkan nilai yg fraud di V12
 v12_fraud <- new_df%>%
@@ -168,8 +167,93 @@ length(data_outlier_v12)
 #menghilangkan data outlier dari dataset 
 new_df <- new_df[-outlier_v12,]
 
-#mereduksi dimensi dengan t-SNE
-##membuat sumbu x dan y untuk t-sne
-X <- subset(new_df,select=-Class)
-Y <- new_df[,"Class"]
-Y <- factor(Y,levels = c(0,1),labels = c("Non-Frauds","Frauds"))
+##Mendapatkan nilai yg fraud di V10
+v10_fraud <- new_df%>%
+  filter(Class==1)
+
+
+v10_q25 <- quantile(v10_fraud$V10,0.25)
+sprintf("kuartil 25 v10 adalah %g",v10_q25)
+v10_q75 <- quantile(v10_fraud$V10,0.75)
+sprintf("kuartil 75 v10 adalah %g",v10_q75)
+v10_iqr <- v10_q75 - v10_q25
+sprintf("Jarak Interkuartil v10 adalah %g",v10_iqr)
+
+v10_upper <- v10_q75 + v10_iqr*1.5
+sprintf("V10 Upper : %g",v10_upper)
+v10_lower <- v10_q25 - v10_iqr*1.5
+sprintf("V10 Lower : %g",v10_lower)
+
+outlier_v10 <- which(v10_fraud$V10<v10_lower|v10_fraud$V10>v10_upper) 
+data_outlier_v10 <- v10_fraud[outlier_v10,"V10"]
+print(data_outlier_v10)
+length(data_outlier_v10)
+#menghilangkan data outlier dari dataset 
+new_df <- new_df[-outlier_v10,]
+
+#mengubah variabel Class menjadi factor N= Non-fraud dan F= Frauds
+new_df$Class <- factor(new_df$Class,levels = c(0,1),labels = c("N","F"))
+
+#Membuat model dengan caret beserta cv dan pca
+
+##membuat object hypertuning parameter
+set.seed(50)
+mycontrol <- trainControl(method = "cv",
+                          number = 5,
+                          summaryFunction = twoClassSummary,
+                          classProbs = TRUE,
+                          verboseIter = TRUE)
+
+##membuat model klasifikasi dengan random forest
+model_rf <- train( Class ~ .,
+                    data = new_df,
+                    tuneLength=3,
+                    method = "ranger",
+                    trControl = mycontrol)
+print(model_rf)
+max(model_rf[["results"]][["ROC"]])
+
+
+##membuat model klasifikasi dengan glmnet
+model_glmnet <- train( Class ~ .,
+                   data = new_df,
+                   tuneLength=3,
+                   method = "glmnet",
+                   trControl = mycontrol)
+print(model_glmnet)
+max(model_glmnet[["results"]][["ROC"]])
+
+##membuat model klasifikasi dengan xgbDart
+model_xgbdart <- train( Class ~ .,
+                       data = new_df,
+                       tuneLength=3,
+                       method = "xgbDART",
+                       trControl = mycontrol)
+print(model_xgbdart)
+max(model_xgbdart[["results"]][["ROC"]])
+
+##membuat model klasifikasi dengan SVM
+model_svm <- train( Class ~ .,
+                        data = new_df,
+                        tuneLength=3,
+                        method = "svmRadial",
+                        trControl = mycontrol)
+print(model_svm)
+max(model_svm[["results"]][["ROC"]])
+
+##membuat model klasifikasi dengan KNN
+model_knn <- train( Class ~ .,
+                    data = new_df,
+                    tuneLength=3,
+                    method = "knn",
+                    trControl = mycontrol)
+print(model_knn)
+max(model_knn[["results"]][["ROC"]])
+
+
+#Membandingkan performa model 
+list_model <- list(RF=model_rf,GLMNET=model_glmnet,XGBDART=model_xgbdart,SVM=model_svm,KNN=model_knn)
+model_compare <- resamples(list_model)
+summary(model_compare)
+scales <- list(x=list(relation="free"), y=list(relation="free"))
+bwplot(model_compare, scales=scales)
